@@ -6,7 +6,7 @@
  * @module gravity-worker/artifacts
  */
 
-import { join } from "@std/path";
+import { dirname, join } from "@std/path";
 
 export interface PlanArtifactOptions {
   taskId: string;
@@ -89,15 +89,16 @@ git checkout gravity-worker/${taskId}
 }
 
 /**
- * Saves an artifact file to the specified target directory.
+ * Saves an artifact file to the specified target directory, ensuring parent directories exist.
  */
 export async function saveArtifact(
   targetDir: string,
   filename: string,
   content: string,
 ): Promise<string> {
-  await Deno.mkdir(targetDir, { recursive: true });
   const filePath = join(targetDir, filename);
+  const parentDir = dirname(filePath);
+  await Deno.mkdir(parentDir, { recursive: true });
   await Deno.writeTextFile(filePath, content);
   return filePath;
 }
