@@ -29,6 +29,10 @@ export function buildAppManifest(options: ManifestOptions = {}): Record<string, 
     name: appName,
     url: "https://github.com/atzufuki/gravity-worker",
     redirect_url: redirectUrl,
+    hook_attributes: {
+      url: "http://localhost:3000/webhook",
+      active: false,
+    },
     public: false,
     default_permissions: {
       issues: "write",
