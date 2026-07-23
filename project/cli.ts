@@ -219,15 +219,20 @@ export async function main(args: string[] = Deno.args) {
           // 10. Create GitHub Pull Request linked with "Closes #issue" & Comment
           if (githubToken && ghContext.repoOwner && ghContext.repoName) {
             console.log(`\n🔀 Creating GitHub Pull Request...`);
-            const closesKeyword = ghContext.issueNumber ? `\n\nCloses #${ghContext.issueNumber}` : "";
-            const prBody = `${walkthroughContent}${closesKeyword}`;
+            const issueNum = ghContext.issueNumber ?? (flags.issue ? parseInt(flags.issue, 10) : undefined);
+            const prTitle = issueNum
+              ? `Fix #${issueNum}: ${prompt}`
+              : `[GravityWorker] ${prompt}`;
+
+            const closesHeader = issueNum ? `Closes #${issueNum}\n\n` : "";
+            const prBody = `${closesHeader}${walkthroughContent}`;
 
             const prUrl = await createPullRequest({
               owner: ghContext.repoOwner,
               repo: ghContext.repoName,
               head: worktree.branchName,
               base: "main",
-              title: `[GravityWorker] Fix #${taskId}: ${prompt}`,
+              title: prTitle,
               body: prBody,
               token: githubToken,
             });
