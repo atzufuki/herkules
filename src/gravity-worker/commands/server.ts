@@ -120,20 +120,14 @@ export class ServerCommand extends BaseCommand {
                 processedIssues.add(issueNum);
                 await saveState();
 
-                // Spawn local gravity-worker run command
-                const runCmd = new Deno.Command("deno", {
-                  args: [
-                    "run",
-                    "-A",
-                    `${Deno.cwd()}/project/cli.ts`,
-                    "run",
-                    "--issue",
-                    String(issueNum),
-                    "--prompt",
-                    issueTitle,
-                    "--agent",
-                    agentEngine,
-                  ],
+                // Determine execution binary path dynamically
+                const execPath = Deno.execPath();
+                const runArgs = execPath.endsWith("deno")
+                  ? ["run", "-A", `${Deno.cwd()}/project/cli.ts`, "run", "--issue", String(issueNum), "--prompt", issueTitle, "--agent", agentEngine]
+                  : ["run", "--issue", String(issueNum), "--prompt", issueTitle, "--agent", agentEngine];
+
+                const runCmd = new Deno.Command(execPath, {
+                  args: runArgs,
                   cwd: targetDir,
                   env: Deno.env.toObject(),
                   stdout: "inherit",
