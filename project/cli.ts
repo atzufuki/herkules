@@ -145,6 +145,8 @@ export async function main(args: string[] = Deno.args) {
         }
       }
 
+      const issueNum = ghContext.issueNumber ?? (flags.issue ? parseInt(flags.issue, 10) : undefined);
+
       // 3. React with 👀 (eyes emoji) immediately & post AI-generated start acknowledgement comment
       if (githubToken && ghContext.repoOwner && ghContext.repoName && ghContext.issueNumber) {
         console.log(`👀 Reacting with eyes emoji to GitHub Issue #${ghContext.issueNumber}...`);
@@ -169,10 +171,10 @@ export async function main(args: string[] = Deno.args) {
         });
       }
 
-      // 4. Create isolated Worktree
-      console.log(`\n🌿 Creating Git Worktree for branch gravity-worker/${taskId}...`);
-      const worktree = await createWorktree({ taskId });
-      console.log(`✓ Worktree ready at: ${worktree.worktreePath}`);
+      // 4. Create isolated Worktree using standard fix/ID-task branch naming
+      console.log(`\n🌿 Creating Git Worktree for task #${taskId}...`);
+      const worktree = await createWorktree({ taskId, issueNumber: issueNum });
+      console.log(`✓ Worktree ready at: ${worktree.worktreePath} (branch: ${worktree.branchName})`);
 
       try {
         // 5. Save Implementation Plan Artifact in hidden .gravity-worker/ (isolated from target repo commits)
@@ -219,7 +221,6 @@ export async function main(args: string[] = Deno.args) {
           // 10. Create GitHub Pull Request linked with "Closes #issue" & Comment
           if (githubToken && ghContext.repoOwner && ghContext.repoName) {
             console.log(`\n🔀 Creating GitHub Pull Request...`);
-            const issueNum = ghContext.issueNumber ?? (flags.issue ? parseInt(flags.issue, 10) : undefined);
             const prTitle = issueNum
               ? `Fix #${issueNum}: ${prompt}`
               : `[GravityWorker] ${prompt}`;

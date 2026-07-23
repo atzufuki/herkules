@@ -16,6 +16,7 @@ export interface WorktreeInfo {
 
 export interface CreateWorktreeOptions {
   taskId: string;
+  issueNumber?: number;
   baseBranch?: string;
   worktreeRootDir?: string;
 }
@@ -62,14 +63,14 @@ export async function getCurrentBranch(cwd?: string): Promise<string> {
 }
 
 /**
- * Creates an isolated Git worktree for a task.
+ * Creates an isolated Git worktree for a task using standard branch naming (e.g. fix/48-task).
  */
 export async function createWorktree(
   options: CreateWorktreeOptions,
   cwd?: string,
 ): Promise<WorktreeInfo> {
-  const { taskId, baseBranch, worktreeRootDir = ".worktrees" } = options;
-  const branchName = `gravity-worker/${taskId}`;
+  const { taskId, issueNumber, baseBranch, worktreeRootDir = ".worktrees" } = options;
+  const branchName = issueNumber ? `fix/${issueNumber}-${taskId}` : `gravity-worker/${taskId}`;
   const targetDir = join(worktreeRootDir, taskId);
 
   // Ensure root worktree dir exists
