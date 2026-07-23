@@ -1,8 +1,8 @@
 /**
  * GravityWorker - GitHub App Manifest Flow & Automated Repository Setup Module
  *
- * Automated GitHub App registration, workflow permissions configuration, secret management,
- * and workflow file generation for 100% zero-config deployment.
+ * Automated GitHub App registration via POST form auto-submission, workflow permissions configuration,
+ * secret management, and workflow file generation for 100% zero-config deployment.
  *
  * @module gravity-worker/github_app
  */
@@ -45,15 +45,6 @@ export function buildAppManifest(options: ManifestOptions = {}): Record<string, 
 }
 
 /**
- * Creates the GitHub App Manifest creation URL for browser opening.
- */
-export function getManifestUrl(options: ManifestOptions = {}): string {
-  const manifest = buildAppManifest(options);
-  const jsonStr = JSON.stringify(manifest);
-  return `https://github.com/settings/apps/new?manifest=${encodeURIComponent(jsonStr)}`;
-}
-
-/**
  * Exchanges the code from the manifest callback URL for App ID and Private Key.
  */
 export async function exchangeManifestCode(code: string): Promise<GitHubAppCredentials> {
@@ -80,11 +71,18 @@ export async function exchangeManifestCode(code: string): Promise<GitHubAppCrede
 }
 
 /**
- * Starts a temporary local HTTP server to receive the GitHub App manifest callback.
+ * Starts a temporary local HTTP server on http://localhost:3000 to auto-submit the GitHub App
+ * manifest POST form (pre-filling 100% of fields) and receive the callback.
  */
-export async function listenForManifestCallback(port = 3000, timeoutMs = 120000): Promise<GitHubAppCredentials> {
+export async function listenForManifestCallback(
+  manifestOptions: ManifestOptions = {},
+  port = 3000,
+  timeoutMs = 120000,
+): Promise<GitHubAppCredentials> {
   const controller = new AbortController();
   const { signal } = controller;
+  const manifest = buildAppManifest(manifestOptions);
+  const manifestJsonStr = JSON.stringify(manifest);
 
   let credentialsResolver: (value: GitHubAppCredentials) => void;
   let credentialsRejecter: (reason: Error) => void;
@@ -100,6 +98,7 @@ export async function listenForManifestCallback(port = 3000, timeoutMs = 120000)
       const url = new URL(req.url);
       const code = url.searchParams.get("code");
 
+      // Step 2: Receive OAuth callback from GitHub after App creation
       if (code) {
         try {
           const credentials = await exchangeManifestCode(code);
@@ -107,8 +106,9 @@ export async function listenForManifestCallback(port = 3000, timeoutMs = 120000)
           setTimeout(() => controller.abort(), 500);
 
           return new Response(
-            `<html><body style="font-family:sans-serif;text-align:center;padding:50px;">
-              <h2>🎉 GitHub App Created Successfully!</h2>
+            `<!DOCTYPE html>
+            <html><body style="font-family:system-ui,sans-serif;text-align:center;padding:50px;background:#0d1117;color:#c9d1d9;">
+              <h2 style="color:#58a6ff;">🎉 GitHub App Created Successfully!</h2>
               <p>GravityWorker is setting up your repository...</p>
             </body></html>`,
             { headers: { "content-type": "text/html; charset=utf-8" } },
@@ -121,7 +121,27 @@ export async function listenForManifestCallback(port = 3000, timeoutMs = 120000)
         }
       }
 
-      return new Response("Waiting for GitHub callback...", { status: 400 });
+      // Step 1: Auto-submit POST form to GitHub to pre-fill 100% of form fields
+      const escapedManifest = manifestJsonStr.replace(/'/g, "&apos;").replace(/"/g, "&quot;");
+      const html = `<!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <title>Register GravityWorker GitHub App</title>
+      </head>
+      <body style="font-family:system-ui,sans-serif;text-align:center;padding:50px;background:#0d1117;color:#c9d1d9;">
+        <h2 style="color:#58a6ff;">🚀 Registering GravityWorker GitHub App...</h2>
+        <p>Redirecting to GitHub with 100% pre-filled fields & permissions...</p>
+        <form id="manifestForm" action="https://github.com/settings/apps/new" method="post">
+          <input type="hidden" name="manifest" value="${escapedManifest}">
+        </form>
+        <script>
+          document.getElementById('manifestForm').submit();
+        </script>
+      </body>
+      </html>`;
+
+      return new Response(html, { headers: { "content-type": "text/html; charset=utf-8" } });
     },
   );
 

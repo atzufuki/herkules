@@ -2,7 +2,8 @@
  * Alexi Management Command: setup_app
  *
  * Automated 100% Zero-Touch GitHub Setup for GravityWorker.
- * Creates GitHub App, configures workflow permissions, injects secrets, and generates workflow file.
+ * Creates GitHub App via auto-submitted manifest POST form, configures workflow permissions,
+ * injects secrets, and generates workflow file.
  *
  * @module gravity-worker/commands/setup_app
  */
@@ -11,7 +12,6 @@ import { BaseCommand } from "@alexi/core/management";
 import {
   createWorkflowFile,
   enableRepoWorkflowPermissions,
-  getManifestUrl,
   listenForManifestCallback,
   setRepoSecretWithGh,
 } from "@gravity-worker/github_app.ts";
@@ -62,28 +62,34 @@ export class SetupAppCommand extends BaseCommand {
       console.log(`📌 Target directory: ${targetDir}\n`);
     }
 
-    // 1. Generate & Open GitHub App Manifest URL
     const manifestAppName = repoSpec ? `gravity-worker-${repoSpec.split("/")[1] ?? "app"}` : "gravity-worker";
-    const manifestUrl = getManifestUrl({ appName: manifestAppName });
-    console.log("1️⃣ Opening browser for single-click GitHub App creation...");
-    console.log(`   URL: ${manifestUrl}\n`);
+    const localUrl = "http://localhost:3000";
 
+    console.log("1️⃣ Starting local setup server and opening browser...");
+    console.log(`   URL: ${localUrl}\n`);
+
+    // Start local server to handle POST form auto-submit & OAuth callback
+    const callbackPromise = listenForManifestCallback({ appName: manifestAppName });
+
+    // Open browser to local server
     try {
-      if (Deno.build.os === "linux") {
-        new Deno.Command("xdg-open", { args: [manifestUrl] }).spawn();
-      } else if (Deno.build.os === "darwin") {
-        new Deno.Command("open", { args: [manifestUrl] }).spawn();
-      } else if (Deno.build.os === "windows") {
-        new Deno.Command("cmd", { args: ["/c", "start", manifestUrl] }).spawn();
-      }
+      setTimeout(() => {
+        if (Deno.build.os === "linux") {
+          new Deno.Command("xdg-open", { args: [localUrl] }).spawn();
+        } else if (Deno.build.os === "darwin") {
+          new Deno.Command("open", { args: [localUrl] }).spawn();
+        } else if (Deno.build.os === "windows") {
+          new Deno.Command("cmd", { args: ["/c", "start", localUrl] }).spawn();
+        }
+      }, 300);
     } catch {
       // Ignore if browser launch fails
     }
 
-    console.log("2️⃣ Waiting for GitHub App creation callback on http://localhost:3000/callback ...");
+    console.log("2️⃣ Waiting for single-click GitHub App creation...");
 
     try {
-      const creds = await listenForManifestCallback();
+      const creds = await callbackPromise;
       console.log("\n🎉 GitHub App Created!");
       console.log(`- App Name: ${creds.slug}`);
       console.log(`- App ID:   ${creds.appId}`);
