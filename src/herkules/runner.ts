@@ -6,7 +6,7 @@
  * @module herkules/runner
  */
 
-import { dirname, join } from "@std/path";
+import { dirname, join, resolve } from "@std/path";
 
 export interface RunOptions {
   prompt: string;
@@ -415,9 +415,10 @@ export class AntigravityRunner implements AgentRunner {
     }
 
     try {
-      options.onChunk?.(`🚀 Executing Antigravity ('agy') CLI agent in ${worktreePath}...\n`);
+      const absWorktreePath = resolve(worktreePath);
+      options.onChunk?.(`🚀 Executing Antigravity ('agy') CLI agent in ${absWorktreePath}...\n`);
       
-      const herkulesDir = join(worktreePath, ".herkules");
+      const herkulesDir = join(absWorktreePath, ".herkules");
       await Deno.mkdir(herkulesDir, { recursive: true }).catch(() => {});
       const logFilePath = join(herkulesDir, "agy_exec.log");
       await Deno.writeTextFile(logFilePath, "").catch(() => {});
