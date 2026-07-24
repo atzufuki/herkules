@@ -107,7 +107,7 @@ export interface ProxyExecuteResponse {
   error?: string;
 }
 
-function connectNativeTunnel(relayUrl: string, repoSpec: string, localPort: number): WebSocket | undefined {
+export function connectNativeTunnel(relayUrl: string, repoSpec: string, localPort: number): WebSocket | undefined {
   try {
     const wsUrl = relayUrl
       .replace(/^http:/, "ws:")
