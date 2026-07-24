@@ -323,6 +323,12 @@ export class ProxyCommand extends BaseCommand {
                 durationMs: 0,
               };
 
+              // Send 3-second keep-alive heartbeat chunks so Deno Deploy Edge Relay never times out (30s idle limit)
+              const heartbeatTimer = setInterval(() => {
+                const pingChunk = JSON.stringify({ type: "chunk", text: `⏳ Agent running on local proxy...\n` }) + "\n";
+                writer.write(encoder.encode(pingChunk)).catch(() => {});
+              }, 3000);
+
               try {
                 const runner = new AntigravityRunner();
                 console.log(`\n🧠 [Antigravity Stream] Agent thought stream & execution log:`);
@@ -358,6 +364,8 @@ export class ProxyCommand extends BaseCommand {
 
                 console.log(`✓ Proxy execution completed successfully. (${Object.keys(files).length} files generated)`);
 
+                clearInterval(heartbeatTimer);
+
                 const resultLine = JSON.stringify({
                   type: "result",
                   success: result.success,
@@ -369,6 +377,7 @@ export class ProxyCommand extends BaseCommand {
                 await writer.write(encoder.encode(resultLine)).catch(() => {});
                 await writer.close().catch(() => {});
               } catch (err) {
+                clearInterval(heartbeatTimer);
                 const msg = err instanceof Error ? err.message : String(err);
                 console.error(`❌ Proxy execution error: ${msg}`);
                 const errLine = JSON.stringify({
