@@ -355,13 +355,34 @@ export class AntigravityRunner implements AgentRunner {
 
     try {
       options.onChunk?.(`🚀 Executing Antigravity ('agy') CLI agent in ${worktreePath}...\n`);
-      const command = new Deno.Command("agy", {
-        args: ["--print", prompt, "--dangerously-skip-permissions", "--print-timeout", "5m"],
-        cwd: worktreePath,
-        env: { ...Deno.env.toObject(), ...env },
-        stdout: "piped",
-        stderr: "piped",
-      });
+      
+      let binary = "agy";
+      let args = ["--print", prompt, "--dangerously-skip-permissions", "--print-timeout", "5m"];
+
+      // In Linux environments, attempt executing under stdbuf -oL -eL to unbuffer stdout/stderr
+      if (Deno.build.os === "linux") {
+        binary = "stdbuf";
+        args = ["-oL", "-eL", "agy", "--print", prompt, "--dangerously-skip-permissions", "--print-timeout", "5m"];
+      }
+
+      let command: Deno.Command;
+      try {
+        command = new Deno.Command(binary, {
+          args,
+          cwd: worktreePath,
+          env: { ...Deno.env.toObject(), ...env },
+          stdout: "piped",
+          stderr: "piped",
+        });
+      } catch {
+        command = new Deno.Command("agy", {
+          args: ["--print", prompt, "--dangerously-skip-permissions", "--print-timeout", "5m"],
+          cwd: worktreePath,
+          env: { ...Deno.env.toObject(), ...env },
+          stdout: "piped",
+          stderr: "piped",
+        });
+      }
 
       const child = command.spawn();
       let stdout = "";
