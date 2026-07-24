@@ -153,7 +153,7 @@ export function formatCommandResponse(
   if (!success && error) {
     return {
       command,
-      title: `❌ Command @herkules ${command} failed`,
+      title: `❌ Command @herkules-bot ${command} failed`,
       body: `⚠️ **Herkules Command Failed** (\`${command}\`)\n\n**Error:** ${error}`,
       success: false,
     };

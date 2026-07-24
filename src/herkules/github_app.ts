@@ -468,7 +468,7 @@ jobs:
   herkules:
     if: >-
       (github.event_name == 'issues' && github.event.label.name == 'herkules') ||
-      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@herkules')) ||
+      (github.event_name == 'issue_comment' && (contains(github.event.comment.body, '@herkules-bot') || contains(github.event.comment.body, '@herkules'))) ||
       (github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
 

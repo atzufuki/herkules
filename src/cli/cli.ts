@@ -233,7 +233,7 @@ export async function main(args: string[] = Deno.args) {
       // Generate Conventional Commits metadata (feat/fix branch, commit msg, PR title)
       const conventional = generateConventionalMetadata(effectivePrompt, issueNum);
 
-      // 3. React with 👀 (eyes emoji) immediately & post AI-generated start acknowledgement comment
+      // 3. React with 👀 (eyes emoji) immediately & post AI-generated start acknowledgement comment for full executions
       if (githubToken && ghContext.repoOwner && ghContext.repoName && issueNum) {
         console.log(`👀 Reacting with eyes emoji to GitHub Issue #${issueNum}...`);
         await addReactionToIssueOrComment({
@@ -245,16 +245,19 @@ export async function main(args: string[] = Deno.args) {
           token: githubToken,
         }).catch(() => {});
 
-        console.log(`💬 Generating & posting start acknowledgement comment to GitHub Issue #${issueNum}...`);
-        const startBody = await generateAiMessage(effectivePrompt, "start");
+        // Only post "I'm starting work" comment for full implementation tasks, not plan/review commands
+        if (parsedCmd.command === "run" || parsedCmd.command === "update" || parsedCmd.command === "retry") {
+          console.log(`💬 Generating & posting start acknowledgement comment to GitHub Issue #${issueNum}...`);
+          const startBody = await generateAiMessage(effectivePrompt, "start");
 
-        await postIssueComment({
-          owner: ghContext.repoOwner,
-          repo: ghContext.repoName,
-          issueNumber: issueNum,
-          body: startBody,
-          token: githubToken,
-        }).catch((e) => console.warn(`[GitHub API Notice] Could not post start comment: ${e.message}`));
+          await postIssueComment({
+            owner: ghContext.repoOwner,
+            repo: ghContext.repoName,
+            issueNumber: issueNum,
+            body: startBody,
+            token: githubToken,
+          }).catch((e) => console.warn(`[GitHub API Notice] Could not post start comment: ${e.message}`));
+        }
       }
 
       // 4. Create isolated Worktree inside targetDir using Conventional Branch Naming (e.g. feat/48-slug)
@@ -276,9 +279,9 @@ export async function main(args: string[] = Deno.args) {
         });
         await saveArtifact(worktree.worktreePath, ".herkules/implementation_plan.md", planContent);
 
-        // Handle @herkules plan command early exit (plan-only generation)
+        // Handle @herkules-bot plan command early exit (plan-only generation)
         if (parsedCmd.command === "plan") {
-          console.log(`📋 Processed @herkules plan command.`);
+          console.log(`📋 Processed @herkules-bot plan command.`);
           const planCmdRes = formatCommandResponse("plan", {
             prompt: effectivePrompt,
             content: planContent,
@@ -299,7 +302,7 @@ export async function main(args: string[] = Deno.args) {
           if (!flags["keep-worktree"]) {
             await removeWorktree(worktree, { deleteBranch: true });
           }
-          break;
+          return;
         }
 
         // 6. Run Agent (either via Proxy or natively)
@@ -393,9 +396,9 @@ export async function main(args: string[] = Deno.args) {
         });
         await saveArtifact(worktree.worktreePath, ".herkules/review.md", reviewContent);
 
-        // Handle @herkules review command
+        // Handle @herkules-bot review command
         if (parsedCmd.command === "review") {
-          console.log(`🔍 Processed @herkules review command.`);
+          console.log(`🔍 Processed @herkules-bot review command.`);
           const reviewCmdRes = formatCommandResponse("review", {
             prompt: effectivePrompt,
             content: reviewContent,
@@ -416,7 +419,7 @@ export async function main(args: string[] = Deno.args) {
           if (!flags["keep-worktree"]) {
             await removeWorktree(worktree, { deleteBranch: true });
           }
-          break;
+          return;
         }
 
         // 9. Commit & Push Worktree Changes using Conventional Commits format
