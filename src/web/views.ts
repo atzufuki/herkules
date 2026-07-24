@@ -41,8 +41,9 @@ export async function tunnelView(request: Request): Promise<Response> {
   // 1. WebSocket Upgrade Request for Local Proxy Client or Runner Client
   const upgradeHeader = request.headers.get("upgrade");
   if (upgradeHeader && upgradeHeader.toLowerCase() === "websocket") {
+    const isRunnerClient = url.pathname.startsWith("/ws/client/") || request.headers.get("x-client-role") === "runner";
     const { socket, response } = Deno.upgradeWebSocket(request);
-    if (url.pathname.startsWith("/ws/client/") || request.headers.get("x-client-role") === "runner") {
+    if (isRunnerClient) {
       handleClientWebSocket(socket, repoSpec);
     } else {
       TunnelRegistry.register(repoSpec, socket);
