@@ -182,12 +182,18 @@ export class TunnelRegistry {
         }
 
         // Handle full response if present or standard response
-        const res: TunnelResponse | undefined = payload.response || (payload.status !== undefined ? (payload as any) : undefined);
-        if (res && res.id) {
-          const resolver = this.pendingRequests.get(res.id);
+        const resId = payload.id || payload.response?.id;
+        if (resId && (payload.done || payload.response)) {
+          const resolver = this.pendingRequests.get(resId);
           if (resolver) {
-            resolver(res);
-            this.pendingRequests.delete(res.id);
+            const resObj: TunnelResponse = payload.response || {
+              id: resId,
+              status: 200,
+              headers: { "Content-Type": "application/x-ndjson" },
+              body: "",
+            };
+            resolver(resObj);
+            this.pendingRequests.delete(resId);
           }
         }
       } catch (err) {

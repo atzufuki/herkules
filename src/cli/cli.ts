@@ -569,7 +569,9 @@ Do NOT use stiff robotic statements like "An implementation plan has been prepar
               error: data.error,
             };
           } catch (err) {
+            const errMsg = err instanceof Error ? `${err.message}\n${err.stack}` : String(err);
             console.warn(`⚠️ Proxy execution failed: ${err instanceof Error ? err.message : String(err)}`);
+            console.error(`🔍 [Proxy Diagnostic Log] Detailed error trace:\n${errMsg}`);
             console.log("⚡ Falling back to native agent execution in CI...");
             const runner = AgentRunnerFactory.getRunner(flags.agent);
             result = await runner.run({
