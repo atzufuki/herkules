@@ -226,6 +226,7 @@ export async function fetchProxyExecutionViaWebSocket(
             const item = JSON.parse(cleanLine);
             if (item.type === "chunk" && typeof item.text === "string") {
               Deno.stdout.writeSync(new TextEncoder().encode(item.text));
+              try { (Deno.stdout as any).flush?.(); } catch {}
             } else if (item.type === "result" || item.success !== undefined) {
               finalResult = {
                 success: item.success ?? true,
@@ -239,6 +240,7 @@ export async function fetchProxyExecutionViaWebSocket(
             }
           } catch {
             Deno.stdout.writeSync(new TextEncoder().encode(cleanLine + "\n"));
+            try { (Deno.stdout as any).flush?.(); } catch {}
           }
         }
 

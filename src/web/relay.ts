@@ -431,9 +431,7 @@ export function handleClientWebSocket(ws: WebSocket, repoSpec: string): void {
           (chunkData) => {
             if (chunkData.chunk && ws.readyState === 1) {
               chunkCount++;
-              if (chunkCount % 5 === 1 || chunkData.done) {
-                console.log(`📡 [ClientWS] Forwarded chunk #${chunkCount} (${chunkData.chunk.length} bytes) to runner for ${repoSpec}`);
-              }
+              console.log(`📡 [ClientWS] Forwarded chunk #${chunkCount} (${chunkData.chunk.length} bytes) to runner for ${repoSpec}`);
               ws.send(chunkData.chunk);
             }
           },
