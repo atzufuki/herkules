@@ -118,6 +118,150 @@ export async function parseNdjsonStream(
   return finalResult;
 }
 
+export async function fetchProxyExecutionViaWebSocket(
+  proxyUrl: string,
+  fullContextPrompt: string,
+  issueNum: number | string | undefined,
+  repoSpec: string | undefined,
+  worktreePath: string,
+): Promise<{ success: boolean; output: string; durationMs: number; error?: string }> {
+  const startTime = Date.now();
+  let wsUrl = proxyUrl;
+
+  // Convert HTTP tunnel URL to WebSocket client URL if needed
+  if (wsUrl.startsWith("http://")) {
+    wsUrl = wsUrl.replace("http://", "ws://");
+  } else if (wsUrl.startsWith("https://")) {
+    wsUrl = wsUrl.replace("https://", "wss://");
+  }
+
+  // Ensure wsUrl points to client endpoint /ws/client/owner/repo
+  if (!wsUrl.includes("/ws/client/")) {
+    const tunnelMatch = wsUrl.match(/\/tunnel\/([^/]+)\/([^/]+)/);
+    if (tunnelMatch) {
+      wsUrl = wsUrl.replace(/\/tunnel\/([^/]+)\/([^/]+).*/, `/ws/client/${tunnelMatch[1]}/${tunnelMatch[2]}`);
+    } else {
+      wsUrl = wsUrl.replace(/\/+$/, "") + `/ws/client/${repoSpec}`;
+    }
+  }
+
+  console.log(`🔌 Connecting Native WebSocket Runner Client to ${wsUrl}...`);
+
+  return new Promise((resolve, reject) => {
+    let ws: WebSocket;
+    let isCompleted = false;
+    let finalResult: NdjsonStreamResult = {
+      success: false,
+      files: {},
+      logs: "",
+      engine: "antigravity",
+      error: "No result received from WebSocket stream",
+    };
+
+    const timeoutTimer = setTimeout(() => {
+      if (!isCompleted) {
+        isCompleted = true;
+        try { ws.close(); } catch {}
+        reject(new Error("WebSocket proxy execution timed out after 5 minutes"));
+      }
+    }, 300000);
+
+    try {
+      ws = new WebSocket(wsUrl);
+    } catch (err) {
+      clearTimeout(timeoutTimer);
+      return reject(err);
+    }
+
+    ws.onopen = () => {
+      console.log(`✓ Connected to Native WebSocket Runner Client! Requesting proxy execution...`);
+      const reqPayload = {
+        id: crypto.randomUUID(),
+        method: "POST",
+        url: "/api/execute",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt: fullContextPrompt,
+          issueNum,
+          repoSpec,
+        }),
+      };
+      ws.send(JSON.stringify(reqPayload));
+    };
+
+    let buffer = "";
+
+    ws.onmessage = async (event) => {
+      const dataStr = String(event.data);
+      buffer += dataStr;
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+
+        try {
+          const item = JSON.parse(trimmed);
+          if (item.type === "chunk" && typeof item.text === "string") {
+            Deno.stdout.writeSync(new TextEncoder().encode(item.text));
+          } else if (item.type === "result" || item.success !== undefined) {
+            finalResult = {
+              success: item.success ?? true,
+              files: item.files ?? {},
+              logs: item.logs ?? "",
+              engine: item.engine ?? "antigravity",
+              error: item.error,
+            };
+          } else if (item.type === "done") {
+            isCompleted = true;
+            clearTimeout(timeoutTimer);
+            try { ws.close(); } catch {}
+
+            // Save generated files to worktree
+            if (finalResult.files && typeof finalResult.files === "object") {
+              for (const [filename, content] of Object.entries(finalResult.files)) {
+                console.log(`✨ Received generated file from proxy: ${filename}`);
+                await Deno.writeTextFile(`${worktreePath}/${filename}`, String(content));
+              }
+            }
+
+            return resolve({
+              success: finalResult.success ?? true,
+              output: finalResult.logs ?? "Proxy execution completed.",
+              durationMs: Date.now() - startTime,
+              error: finalResult.error,
+            });
+          }
+        } catch {
+          Deno.stdout.writeSync(new TextEncoder().encode(trimmed + "\n"));
+        }
+      }
+    };
+
+    ws.onerror = (err) => {
+      console.error(`❌ WebSocket Runner Client Error:`, err);
+    };
+
+    ws.onclose = () => {
+      clearTimeout(timeoutTimer);
+      if (!isCompleted) {
+        isCompleted = true;
+        // If files or result were already captured before close
+        if (finalResult.success || Object.keys(finalResult.files).length > 0) {
+          return resolve({
+            success: finalResult.success ?? true,
+            output: finalResult.logs ?? "Proxy execution completed.",
+            durationMs: Date.now() - startTime,
+            error: finalResult.error,
+          });
+        }
+        reject(new Error(finalResult.error || "WebSocket connection closed unexpectedly"));
+      }
+    };
+  });
+}
+
 function printHelp() {
   console.log(`
 Herkules v${VERSION}
@@ -539,49 +683,14 @@ Do NOT use stiff robotic statements like "An implementation plan has been prepar
 
         if (proxyUrl) {
           console.log(`\n🔗 Delegating execution to Local Antigravity Proxy (${proxyUrl})...`);
-          const startTime = Date.now();
           try {
-            const resp = await fetch(`${proxyUrl}/api/execute`, {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                "Bypass-Tunnel-Remainder": "true",
-                "User-Agent": "Herkules",
-              },
-              signal: AbortSignal.timeout(300000),
-              body: JSON.stringify({
-                prompt: fullContextPrompt,
-                issueNum,
-                repoSpec,
-              }),
-            });
-
-            if (!resp.ok) {
-              throw new Error(`Proxy returned HTTP ${resp.status} ${resp.statusText}`);
-            }
-
-            let data: NdjsonStreamResult;
-            if (resp.body) {
-              data = await parseNdjsonStream(resp.body, (chunkText: string) => {
-                Deno.stdout.writeSync(new TextEncoder().encode(chunkText));
-              });
-            } else {
-              throw new Error("Proxy response body is null");
-            }
-
-            if (data.files && typeof data.files === "object") {
-              for (const [filename, content] of Object.entries(data.files)) {
-                console.log(`✨ Received generated file from proxy: ${filename}`);
-                await Deno.writeTextFile(`${worktree.worktreePath}/${filename}`, String(content));
-              }
-            }
-
-            result = {
-              success: data.success ?? true,
-              output: data.logs ?? "Proxy execution completed.",
-              durationMs: Date.now() - startTime,
-              error: data.error,
-            };
+            result = await fetchProxyExecutionViaWebSocket(
+              proxyUrl,
+              fullContextPrompt,
+              issueNum,
+              repoSpec,
+              worktree.worktreePath,
+            );
           } catch (err) {
             const errMsg = err instanceof Error ? `${err.message}\n${err.stack}` : String(err);
             console.warn(`⚠️ Proxy execution failed: ${err instanceof Error ? err.message : String(err)}`);

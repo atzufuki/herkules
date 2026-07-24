@@ -6,7 +6,7 @@
  * @module web/views
  */
 
-import { handleTokenRelayRequest, TunnelRegistry } from "./relay.ts";
+import { handleClientWebSocket, handleTokenRelayRequest, TunnelRegistry } from "./relay.ts";
 
 /** Health check endpoint — returns JSON status. */
 export function healthView(_request: Request): Response {
@@ -26,7 +26,10 @@ export async function tokenRelayView(request: Request): Promise<Response> {
 /** WebSocket & Tunnel Routing View for Local Daemons. */
 export async function tunnelView(request: Request): Promise<Response> {
   const url = new URL(request.url);
-  const repoMatch = url.pathname.match(/\/tunnel\/([^\/]+)\/([^\/]+)/) || url.pathname.match(/\/ws\/([^\/]+)\/([^\/]+)/);
+  const repoMatch =
+    url.pathname.match(/\/ws\/client\/([^\/]+)\/([^\/]+)/) ||
+    url.pathname.match(/\/tunnel\/([^\/]+)\/([^\/]+)/) ||
+    url.pathname.match(/\/ws\/([^\/]+)\/([^\/]+)/);
 
   if (!repoMatch) {
     return Response.json({ error: "Invalid tunnel URL format. Expected /tunnel/owner/repo" }, { status: 400 });
@@ -35,11 +38,15 @@ export async function tunnelView(request: Request): Promise<Response> {
   const [, owner, repo] = repoMatch;
   const repoSpec = `${owner}/${repo}`;
 
-  // 1. WebSocket Upgrade Request for Local Proxy Client
+  // 1. WebSocket Upgrade Request for Local Proxy Client or Runner Client
   const upgradeHeader = request.headers.get("upgrade");
   if (upgradeHeader && upgradeHeader.toLowerCase() === "websocket") {
     const { socket, response } = Deno.upgradeWebSocket(request);
-    TunnelRegistry.register(repoSpec, socket);
+    if (url.pathname.startsWith("/ws/client/") || request.headers.get("x-client-role") === "runner") {
+      handleClientWebSocket(socket, repoSpec);
+    } else {
+      TunnelRegistry.register(repoSpec, socket);
+    }
     return response;
   }
 

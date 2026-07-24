@@ -401,3 +401,50 @@ export async function handleTokenRelayRequest(req: Request): Promise<Response> {
     return new Response(JSON.stringify({ error: msg }), { status: 500 });
   }
 }
+
+export function handleClientWebSocket(ws: WebSocket, repoSpec: string): void {
+  ws.onmessage = async (event) => {
+    try {
+      const msg = typeof event.data === "string" ? JSON.parse(event.data) : {};
+      const reqId = msg.id || crypto.randomUUID();
+      const tunnelReq: TunnelMessage = {
+        id: reqId,
+        method: msg.method || "POST",
+        url: msg.url || "/api/execute",
+        headers: msg.headers || { "Content-Type": "application/json" },
+        body: typeof msg.body === "string" ? msg.body : JSON.stringify(msg.body || {}),
+      };
+
+      try {
+        await TunnelRegistry.sendStreamingRequest(
+          repoSpec,
+          tunnelReq,
+          (chunkData) => {
+            if (chunkData.chunk && ws.readyState === 1) {
+              ws.send(chunkData.chunk);
+            }
+          },
+          300000,
+        );
+        if (ws.readyState === 1) {
+          ws.send(JSON.stringify({ type: "done", success: true }) + "\n");
+        }
+      } catch (err) {
+        if (ws.readyState === 1) {
+          const errChunk = JSON.stringify({
+            type: "result",
+            success: false,
+            files: {},
+            logs: String(err),
+            engine: "antigravity",
+            error: String(err),
+          }) + "\n";
+          ws.send(errChunk);
+          ws.send(JSON.stringify({ type: "done", success: false, error: String(err) }) + "\n");
+        }
+      }
+    } catch (err) {
+      console.error("❌ [ClientWS] Message processing error:", err);
+    }
+  };
+}
