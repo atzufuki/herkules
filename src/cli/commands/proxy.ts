@@ -298,56 +298,90 @@ export class ProxyCommand extends BaseCommand {
               worktreePath = await Deno.makeTempDir({ prefix: "herkules-proxy-worktree-" });
             }
 
-            let result: { success: boolean; output: string; durationMs: number; error?: string };
-            try {
-              const runner = new AntigravityRunner();
-              console.log(`\n🧠 [Antigravity Stream] Agent thought stream & execution log:`);
-              console.log(`-------------------------------------------------------`);
-              result = await runner.run({
-                prompt: body.prompt,
-                worktreePath,
-                onChunk: (chunk) => {
-                  Deno.stdout.writeSync(new TextEncoder().encode(chunk));
-                },
-              });
-              console.log(`\n-------------------------------------------------------`);
-              await applyFallbackFileWrites(body.prompt, result.output, worktreePath);
-            } finally {
-              // File collection runs next
-            }
+            const { readable, writable } = new TransformStream();
+            const writer = writable.getWriter();
+            const encoder = new TextEncoder();
 
-            // 2. Recursively collect generated/modified files from worktree
-            const files = await collectModifiedFiles(worktreePath);
+            // Run execution asynchronously and stream NDJSON chunks & result
+            (async () => {
+              let result: { success: boolean; output: string; durationMs: number; error?: string } = {
+                success: false,
+                output: "",
+                durationMs: 0,
+              };
 
-            // Fallback: If agent produced summary output but 0 disk files modified, preserve summary artifact
-            if (Object.keys(files).length === 0 && result.output && result.output.trim().length > 0) {
-              const summaryRelPath = ".herkules/summary.md";
-              files[summaryRelPath] = result.output.trim();
-              console.log(`✨ Preserved execution summary artifact in ${summaryRelPath}`);
-            }
+              try {
+                const runner = new AntigravityRunner();
+                console.log(`\n🧠 [Antigravity Stream] Agent thought stream & execution log:`);
+                console.log(`-------------------------------------------------------`);
+                result = await runner.run({
+                  prompt: body.prompt,
+                  worktreePath,
+                  onChunk: (chunk) => {
+                    Deno.stdout.writeSync(new TextEncoder().encode(chunk));
+                    const chunkLine = JSON.stringify({ type: "chunk", text: chunk }) + "\n";
+                    writer.write(encoder.encode(chunkLine)).catch(() => {});
+                  },
+                });
+                console.log(`\n-------------------------------------------------------`);
+                await applyFallbackFileWrites(body.prompt, result.output, worktreePath);
 
-            // 3. Safely clean up temporary worktree
-            if (worktreeObj) {
-              await removeWorktree(worktreeObj, { deleteBranch: true }).catch(() => {});
-            } else if (worktreePath) {
-              await Deno.remove(worktreePath, { recursive: true }).catch(() => {});
-            }
+                // 2. Recursively collect generated/modified files from worktree
+                const files = await collectModifiedFiles(worktreePath);
 
-            console.log(`✓ Proxy execution completed successfully. (${Object.keys(files).length} files generated)`);
+                // Fallback: If agent produced summary output but 0 disk files modified, preserve summary artifact
+                if (Object.keys(files).length === 0 && result.output && result.output.trim().length > 0) {
+                  const summaryRelPath = ".herkules/summary.md";
+                  files[summaryRelPath] = result.output.trim();
+                  console.log(`✨ Preserved execution summary artifact in ${summaryRelPath}`);
+                }
 
-            const responsePayload: ProxyExecuteResponse = {
-              success: result.success,
-              files,
-              logs: result.output,
-              engine: "antigravity",
-            };
+                // 3. Safely clean up temporary worktree
+                if (worktreeObj) {
+                  await removeWorktree(worktreeObj, { deleteBranch: true }).catch(() => {});
+                } else if (worktreePath) {
+                  await Deno.remove(worktreePath, { recursive: true }).catch(() => {});
+                }
 
-            return new Response(JSON.stringify(responsePayload), {
-              headers: { "Content-Type": "application/json", "Bypass-Tunnel-Remainder": "true" },
+                console.log(`✓ Proxy execution completed successfully. (${Object.keys(files).length} files generated)`);
+
+                const resultLine = JSON.stringify({
+                  type: "result",
+                  success: result.success,
+                  files,
+                  logs: result.output,
+                  engine: "antigravity",
+                  error: result.error,
+                }) + "\n";
+                await writer.write(encoder.encode(resultLine)).catch(() => {});
+                await writer.close().catch(() => {});
+              } catch (err) {
+                const msg = err instanceof Error ? err.message : String(err);
+                console.error(`❌ Proxy execution error: ${msg}`);
+                const errLine = JSON.stringify({
+                  type: "result",
+                  success: false,
+                  files: {},
+                  logs: msg,
+                  engine: "antigravity",
+                  error: msg,
+                }) + "\n";
+                await writer.write(encoder.encode(errLine)).catch(() => {});
+                await writer.close().catch(() => {});
+              }
+            })();
+
+            return new Response(readable, {
+              headers: {
+                "Content-Type": "application/x-ndjson",
+                "X-Content-Type-Options": "nosniff",
+                "Cache-Control": "no-cache",
+                "Bypass-Tunnel-Remainder": "true",
+              },
             });
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
-            console.error(`❌ Proxy execution error: ${msg}`);
+            console.error(`❌ Proxy request processing error: ${msg}`);
             return new Response(
               JSON.stringify({ success: false, files: {}, logs: msg, engine: "antigravity", error: msg }),
               { status: 500, headers: { "Content-Type": "application/json", "Bypass-Tunnel-Remainder": "true" } },

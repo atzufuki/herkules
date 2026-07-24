@@ -27,6 +27,83 @@ import { formatCommandResponse, parseCommentCommand } from "@herkules/commands.t
 
 const VERSION = "0.1.0";
 
+export interface NdjsonStreamResult {
+  success: boolean;
+  files: Record<string, string>;
+  logs: string;
+  engine: string;
+  error?: string;
+}
+
+/**
+ * Parses an NDJSON stream line-by-line via TextDecoderStream.
+ * Invokes onChunk for live text chunks and resolves with final result object.
+ */
+export async function parseNdjsonStream(
+  stream: ReadableStream<Uint8Array>,
+  onChunk?: (text: string) => void,
+): Promise<NdjsonStreamResult> {
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let finalResult: NdjsonStreamResult = {
+    success: false,
+    files: {},
+    logs: "",
+    engine: "antigravity",
+    error: "No result received from stream",
+  };
+
+  for await (const chunk of stream) {
+    buffer += decoder.decode(chunk, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+
+      try {
+        const item = JSON.parse(trimmed);
+        if (item.type === "chunk" && typeof item.text === "string") {
+          onChunk?.(item.text);
+        } else if (item.type === "result" || item.success !== undefined) {
+          finalResult = {
+            success: item.success ?? true,
+            files: item.files ?? {},
+            logs: item.logs ?? "",
+            engine: item.engine ?? "antigravity",
+            error: item.error,
+          };
+        }
+      } catch {
+        onChunk?.(trimmed + "\n");
+      }
+    }
+  }
+
+  buffer += decoder.decode();
+  if (buffer.trim()) {
+    try {
+      const item = JSON.parse(buffer.trim());
+      if (item.type === "chunk" && typeof item.text === "string") {
+        onChunk?.(item.text);
+      } else if (item.type === "result" || item.success !== undefined) {
+        finalResult = {
+          success: item.success ?? true,
+          files: item.files ?? {},
+          logs: item.logs ?? "",
+          engine: item.engine ?? "antigravity",
+          error: item.error,
+        };
+      }
+    } catch {
+      onChunk?.(buffer.trim() + "\n");
+    }
+  }
+
+  return finalResult;
+}
+
 function printHelp() {
   console.log(`
 Herkules v${VERSION}
@@ -469,7 +546,15 @@ Do NOT use stiff robotic statements like "An implementation plan has been prepar
               throw new Error(`Proxy returned HTTP ${resp.status} ${resp.statusText}`);
             }
 
-            const data = await resp.json();
+            let data: NdjsonStreamResult;
+            if (resp.body) {
+              data = await parseNdjsonStream(resp.body, (chunkText: string) => {
+                Deno.stdout.writeSync(new TextEncoder().encode(chunkText));
+              });
+            } else {
+              throw new Error("Proxy response body is null");
+            }
+
             if (data.files && typeof data.files === "object") {
               for (const [filename, content] of Object.entries(data.files)) {
                 console.log(`✨ Received generated file from proxy: ${filename}`);

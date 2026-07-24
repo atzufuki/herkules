@@ -81,24 +81,47 @@ export async function tunnelView(request: Request): Promise<Response> {
       tunnelReq,
       (chunkData) => {
         if (chunkData.chunk) {
-          writer.write(encoder.encode(chunkData.chunk)).catch(() => {});
+          const chunkLine = JSON.stringify({ type: "chunk", text: chunkData.chunk }) + "\n";
+          writer.write(encoder.encode(chunkLine)).catch(() => {});
         }
       },
       300000,
     ).then(async (tunnelRes) => {
+      let resPayload: any = {};
       if (tunnelRes.body) {
-        await writer.write(encoder.encode(tunnelRes.body)).catch(() => {});
+        try {
+          resPayload = JSON.parse(tunnelRes.body);
+        } catch {
+          resPayload = { logs: tunnelRes.body };
+        }
       }
+      const resultLine = JSON.stringify({
+        type: "result",
+        success: resPayload.success ?? (tunnelRes.status < 400),
+        files: resPayload.files ?? {},
+        logs: resPayload.logs ?? "",
+        engine: resPayload.engine ?? "antigravity",
+        error: resPayload.error,
+      }) + "\n";
+      await writer.write(encoder.encode(resultLine)).catch(() => {});
       await writer.close().catch(() => {});
     }).catch(async (err) => {
-      await writer.write(encoder.encode(JSON.stringify({ success: false, error: String(err) }))).catch(() => {});
+      const errLine = JSON.stringify({
+        type: "result",
+        success: false,
+        files: {},
+        logs: String(err),
+        engine: "antigravity",
+        error: String(err),
+      }) + "\n";
+      await writer.write(encoder.encode(errLine)).catch(() => {});
       await writer.close().catch(() => {});
     });
 
     return new Response(readable, {
       status: 200,
       headers: {
-        "Content-Type": "application/json",
+        "Content-Type": "application/x-ndjson",
         "X-Content-Type-Options": "nosniff",
         "Cache-Control": "no-cache",
       },
