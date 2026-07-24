@@ -20,7 +20,7 @@ import {
 } from "@herkules/git.ts";
 import { AgentRunnerFactory, applyFallbackFileWrites, generateAiMessage } from "@herkules/runner.ts";
 import { generateCodeReview, generateImplementationPlan, generateWalkthrough, saveArtifact } from "@herkules/artifacts.ts";
-import { addReactionToIssueOrComment, buildFullIssueContext, createPullRequest, fetchIssueComments, getGitHubContext, getRepoFromGitRemote, isFinnishText, IssueCommentItem, postIssueComment } from "@herkules/github.ts";
+import { addLabelToIssue, addReactionToIssueOrComment, buildFullIssueContext, createPullRequest, fetchIssueComments, getGitHubContext, getRepoFromGitRemote, isFinnishText, IssueCommentItem, postIssueComment } from "@herkules/github.ts";
 import { getAppInstallationToken, loadEnvFiles } from "@herkules/github_app.ts";
 import { generateConventionalMetadata } from "@herkules/conventional.ts";
 import { formatCommandResponse, parseCommentCommand } from "@herkules/commands.ts";
@@ -261,8 +261,17 @@ export async function main(args: string[] = Deno.args) {
           token: githubToken,
         }).catch(() => {});
 
-        // Only post "I'm starting work" comment for full implementation tasks, not plan/review commands
+        // Only post "I'm starting work" comment & add 'herkules' label for implementation tasks (run, update, retry), NOT plan/review
         if (parsedCmd.command === "run" || parsedCmd.command === "update" || parsedCmd.command === "retry") {
+          console.log(`🏷️ Adding 'herkules' label to GitHub Issue #${issueNum}...`);
+          await addLabelToIssue({
+            owner: ghContext.repoOwner,
+            repo: ghContext.repoName,
+            issueNumber: issueNum,
+            label: "herkules",
+            token: githubToken,
+          }).catch(() => {});
+
           console.log(`💬 Generating & posting start acknowledgement comment to GitHub Issue #${issueNum}...`);
           const startBody = await generateAiMessage(effectivePrompt, "start");
 

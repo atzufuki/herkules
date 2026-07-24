@@ -176,6 +176,40 @@ export async function detectLanguages(cwd?: string): Promise<string[]> {
 }
 
 /**
+ * Adds a label (e.g. 'herkules') to a GitHub issue.
+ */
+export async function addLabelToIssue(
+  options: {
+    owner: string;
+    repo: string;
+    issueNumber: number;
+    label: string;
+    token: string;
+  },
+): Promise<boolean> {
+  const { owner, repo, issueNumber, label, token } = options;
+  const url = `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/labels`;
+
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Accept": "application/vnd.github.v3+json",
+        "Authorization": `Bearer ${token}`,
+        "Content-Type": "application/json",
+        "User-Agent": "Herkules",
+      },
+      body: JSON.stringify({ labels: [label] }),
+    });
+
+    return response.ok;
+  } catch (err) {
+    console.error(`[GitHub API] Network error adding label '${label}':`, err);
+    return false;
+  }
+}
+
+/**
  * Adds a reaction (eyes, +1, etc.) to an issue or comment on GitHub.
  */
 export async function addReactionToIssueOrComment(
