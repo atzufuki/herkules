@@ -53,31 +53,40 @@ export async function parseNdjsonStream(
     error: "No result received from stream",
   };
 
-  for await (const chunk of stream) {
-    buffer += decoder.decode(chunk, { stream: true });
-    const lines = buffer.split("\n");
-    buffer = lines.pop() ?? "";
+  let hasResult = false;
 
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
+  try {
+    for await (const chunk of stream) {
+      buffer += decoder.decode(chunk, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
 
-      try {
-        const item = JSON.parse(trimmed);
-        if (item.type === "chunk" && typeof item.text === "string") {
-          onChunk?.(item.text);
-        } else if (item.type === "result" || item.success !== undefined) {
-          finalResult = {
-            success: item.success ?? true,
-            files: item.files ?? {},
-            logs: item.logs ?? "",
-            engine: item.engine ?? "antigravity",
-            error: item.error,
-          };
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+
+        try {
+          const item = JSON.parse(trimmed);
+          if (item.type === "chunk" && typeof item.text === "string") {
+            onChunk?.(item.text);
+          } else if (item.type === "result" || item.success !== undefined) {
+            hasResult = true;
+            finalResult = {
+              success: item.success ?? true,
+              files: item.files ?? {},
+              logs: item.logs ?? "",
+              engine: item.engine ?? "antigravity",
+              error: item.error,
+            };
+          }
+        } catch {
+          onChunk?.(trimmed + "\n");
         }
-      } catch {
-        onChunk?.(trimmed + "\n");
       }
+    }
+  } catch (err) {
+    if (!hasResult) {
+      console.warn(`⚠️ [Stream Notice] Stream closed before result: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
@@ -88,6 +97,7 @@ export async function parseNdjsonStream(
       if (item.type === "chunk" && typeof item.text === "string") {
         onChunk?.(item.text);
       } else if (item.type === "result" || item.success !== undefined) {
+        hasResult = true;
         finalResult = {
           success: item.success ?? true,
           files: item.files ?? {},
@@ -99,6 +109,10 @@ export async function parseNdjsonStream(
     } catch {
       onChunk?.(buffer.trim() + "\n");
     }
+  }
+
+  if (hasResult && !finalResult.error) {
+    finalResult.success = true;
   }
 
   return finalResult;
