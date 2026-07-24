@@ -190,6 +190,15 @@ export class TunnelRegistry {
         // Broadcast chunk to all other Deno Deploy edge isolates via BroadcastChannel
         getTunnelBus()?.postMessage({ type: "chunk", payload });
 
+        // Broadcast chunk globally across Deno Deploy edge regions via DenoKV
+        if (payload.id) {
+          getKv().then((kv) => {
+            if (kv) {
+              kv.set(["tunnel_chunk_bus", payload.id], payload, { expireIn: 60000 });
+            }
+          }).catch(() => {});
+        }
+
         // Handle full response if present or standard response
         const resId = payload.id || payload.response?.id;
         if (resId && (payload.done || payload.response)) {
@@ -349,6 +358,26 @@ export class TunnelRegistry {
     timeoutMs = 300000,
   ): Promise<TunnelResponse> {
     this.chunkListeners.set(req.id, onChunk);
+
+    // Watch DenoKV chunk bus for global cross-region streaming
+    (async () => {
+      try {
+        const kv = await getKv();
+        if (!kv) return;
+        const watcher = kv.watch([["tunnel_chunk_bus", req.id]]);
+        for await (const entries of watcher) {
+          if (!this.chunkListeners.has(req.id)) break;
+          const entry = entries[0];
+          if (entry && entry.value) {
+            const chunkData = entry.value as TunnelChunk;
+            onChunk(chunkData);
+          }
+        }
+      } catch {
+        // Ignore KV watch errors
+      }
+    })();
+
     return this.sendRequest(repoSpec, req, timeoutMs);
   }
 }

@@ -1,1 +1,1 @@
-export const HERKULES_VERSION = "0.1.4";
+export const HERKULES_VERSION = "0.1.5";
