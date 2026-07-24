@@ -244,7 +244,7 @@ export class ProxyCommand extends BaseCommand {
       }
     }
 
-    const HERKULES_VERSION = "0.1.2-strict-diff";
+    const HERKULES_VERSION = "0.1.3-live-stream";
 
     console.log("=======================================================");
     console.log(`🚀 HERKULES LOCAL ANTIGRAVITY PROXY SERVER STARTED (v${HERKULES_VERSION})`);
