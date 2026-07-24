@@ -91,6 +91,67 @@ ANTHROPIC_API_KEY=your_anthropic_api_key_here
   return false;
 }
 
+/**
+ * Asynchronously tails a log file, reading new content appended over time.
+ * Calls onChunk for each new text block until stopSignal.stop is true.
+ */
+export async function tailLogFile(
+  logFilePath: string,
+  onChunk: (chunk: string) => void,
+  stopSignal: { stop: boolean },
+  intervalMs = 150,
+): Promise<void> {
+  let fileOffset = 0;
+  const decoder = new TextDecoder();
+
+  while (true) {
+    try {
+      const stat = await Deno.stat(logFilePath).catch(() => null);
+      if (stat && stat.size > fileOffset) {
+        const file = await Deno.open(logFilePath, { read: true });
+        await file.seek(fileOffset, Deno.SeekMode.Start);
+        const buffer = new Uint8Array(stat.size - fileOffset);
+        const bytesRead = await file.read(buffer);
+        file.close();
+
+        if (bytesRead && bytesRead > 0) {
+          fileOffset += bytesRead;
+          const text = decoder.decode(buffer.subarray(0, bytesRead));
+          if (text) {
+            onChunk(text);
+          }
+        }
+      }
+    } catch {
+      // Ignore transient read errors while file is being written
+    }
+
+    if (stopSignal.stop) break;
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+
+  // Final flush after stop signal
+  try {
+    const stat = await Deno.stat(logFilePath).catch(() => null);
+    if (stat && stat.size > fileOffset) {
+      const file = await Deno.open(logFilePath, { read: true });
+      await file.seek(fileOffset, Deno.SeekMode.Start);
+      const buffer = new Uint8Array(stat.size - fileOffset);
+      const bytesRead = await file.read(buffer);
+      file.close();
+
+      if (bytesRead && bytesRead > 0) {
+        const text = decoder.decode(buffer.subarray(0, bytesRead));
+        if (text) {
+          onChunk(text);
+        }
+      }
+    }
+  } catch {
+    // Ignore final read errors
+  }
+}
+
 export const DEFAULT_GEMINI_MODEL = "gemini-3.6-flash";
 
 /**
@@ -356,13 +417,28 @@ export class AntigravityRunner implements AgentRunner {
     try {
       options.onChunk?.(`🚀 Executing Antigravity ('agy') CLI agent in ${worktreePath}...\n`);
       
+      const herkulesDir = join(worktreePath, ".herkules");
+      await Deno.mkdir(herkulesDir, { recursive: true }).catch(() => {});
+      const logFilePath = join(herkulesDir, "agy_exec.log");
+      await Deno.writeTextFile(logFilePath, "").catch(() => {});
+
+      const agyArgs = [
+        "--print",
+        prompt,
+        "--dangerously-skip-permissions",
+        "--print-timeout",
+        "5m",
+        "--log-file",
+        logFilePath,
+      ];
+
       let binary = "agy";
-      let args = ["--print", prompt, "--dangerously-skip-permissions", "--print-timeout", "5m"];
+      let args = agyArgs;
 
       // In Linux environments, attempt executing under stdbuf -oL -eL to unbuffer stdout/stderr
       if (Deno.build.os === "linux") {
         binary = "stdbuf";
-        args = ["-oL", "-eL", "agy", "--print", prompt, "--dangerously-skip-permissions", "--print-timeout", "5m"];
+        args = ["-oL", "-eL", "agy", ...agyArgs];
       }
 
       let command: Deno.Command;
@@ -376,7 +452,7 @@ export class AntigravityRunner implements AgentRunner {
         });
       } catch {
         command = new Deno.Command("agy", {
-          args: ["--print", prompt, "--dangerously-skip-permissions", "--print-timeout", "5m"],
+          args: agyArgs,
           cwd: worktreePath,
           env: { ...Deno.env.toObject(), ...env },
           stdout: "piped",
@@ -384,37 +460,50 @@ export class AntigravityRunner implements AgentRunner {
         });
       }
 
-      const child = command.spawn();
+      const stopTailer = { stop: false };
+      const tailerPromise = options.onChunk
+        ? tailLogFile(logFilePath, options.onChunk, stopTailer)
+        : Promise.resolve();
+
+      let child: Deno.ChildProcess;
       let stdout = "";
       let stderr = "";
 
-      const processStream = async (
-        stream: ReadableStream<Uint8Array>,
-        isStdout: boolean,
-      ) => {
-        const decoder = new TextDecoder();
-        for await (const chunk of stream) {
-          const text = decoder.decode(chunk, { stream: true });
-          if (text) {
-            if (isStdout) stdout += text;
-            else stderr += text;
-            options.onChunk?.(text);
+      let status: Deno.CommandStatus = { success: false, code: 1, signal: null };
+      try {
+        child = command.spawn();
+
+        const processStream = async (
+          stream: ReadableStream<Uint8Array>,
+          isStdout: boolean,
+        ) => {
+          const decoder = new TextDecoder();
+          for await (const chunk of stream) {
+            const text = decoder.decode(chunk, { stream: true });
+            if (text) {
+              if (isStdout) stdout += text;
+              else stderr += text;
+              options.onChunk?.(text);
+            }
           }
-        }
-        const remaining = decoder.decode();
-        if (remaining) {
-          if (isStdout) stdout += remaining;
-          else stderr += remaining;
-          options.onChunk?.(remaining);
-        }
-      };
+          const remaining = decoder.decode();
+          if (remaining) {
+            if (isStdout) stdout += remaining;
+            else stderr += remaining;
+            options.onChunk?.(remaining);
+          }
+        };
 
-      await Promise.all([
-        processStream(child.stdout, true),
-        processStream(child.stderr, false),
-      ]);
+        await Promise.all([
+          processStream(child.stdout, true),
+          processStream(child.stderr, false),
+        ]);
 
-      const status = await child.status;
+        status = await child.status;
+      } finally {
+        stopTailer.stop = true;
+        await tailerPromise;
+      }
       const fullText = `${stdout}\n${stderr}`;
 
       // Check for OAuth / authentication prompt
