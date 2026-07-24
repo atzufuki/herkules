@@ -198,9 +198,9 @@ export async function fetchProxyExecutionViaWebSocket(
         isCompleted = true;
         clearTimeout(timeoutTimer);
         try { ws.close(); } catch {}
-        reject(new Error("❌ Live Stream Timeout: 0 chunks received from proxy for >45s. Live stream connection failed."));
+        reject(new Error("❌ Live Stream Timeout: 0 chunks received from proxy for >120s. Live stream connection failed."));
       }
-    }, 45000);
+    }, 120000);
 
     ws.onmessage = async (event) => {
       const dataStr = String(event.data);

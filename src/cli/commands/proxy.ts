@@ -128,14 +128,15 @@ export function connectNativeTunnel(relayUrl: string, repoSpec: string, localPor
         const msg: TunnelMessage = JSON.parse(event.data);
         reqId = msg.id;
 
-        // Send periodic heartbeat every 2 seconds to keep stream alive
+        // Send periodic heartbeat every 3 seconds to feed live stream and keep connection alive
         heartbeatTimer = setInterval(() => {
           try {
-            ws.send(JSON.stringify({ id: reqId, chunk: `⏳ Agent running on local proxy...\n`, done: false }));
+            const hbText = JSON.stringify({ type: "chunk", text: `⏳ [Local Proxy] Agent active & executing task...\n` }) + "\n";
+            ws.send(JSON.stringify({ id: reqId, chunk: hbText, done: false }));
           } catch {
             clearInterval(heartbeatTimer);
           }
-        }, 2000);
+        }, 3000);
 
         // Forward request locally to Deno.serve endpoint on localhost:localPort
         const targetUrl = `http://127.0.0.1:${localPort}${msg.url}`;
