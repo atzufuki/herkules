@@ -135,6 +135,7 @@ export class TunnelRegistry {
         const kv = await getKv();
         if (kv) {
           await kv.set(["tunnels", key], {
+            online: true,
             repo: repoSpec,
             connectedAt: Date.now(),
             lastSeen: Date.now(),
@@ -233,7 +234,7 @@ export class TunnelRegistry {
       const kv = await getKv();
       if (kv) {
         const entry = await kv.get(["tunnels", key]);
-        return entry?.value?.online === true;
+        return entry?.value?.online === true || entry?.value?.lastSeen !== undefined;
       }
     } catch {
       // Fallback
