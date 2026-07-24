@@ -194,47 +194,73 @@ export async function fetchProxyExecutionViaWebSocket(
     ws.onmessage = async (event) => {
       const dataStr = String(event.data);
       buffer += dataStr;
-      const lines = buffer.split("\n");
-      buffer = lines.pop() ?? "";
+      const rawLines = buffer.split("\n");
+      buffer = rawLines.pop() ?? "";
 
-      for (const line of lines) {
-        const trimmed = line.trim();
+      for (const rawLine of rawLines) {
+        const trimmed = rawLine.trim();
         if (!trimmed) continue;
 
+        let payloadStr = trimmed;
+        let isDoneMessage = false;
+
         try {
-          const item = JSON.parse(trimmed);
-          if (item.type === "chunk" && typeof item.text === "string") {
-            Deno.stdout.writeSync(new TextEncoder().encode(item.text));
-          } else if (item.type === "result" || item.success !== undefined) {
-            finalResult = {
-              success: item.success ?? true,
-              files: item.files ?? {},
-              logs: item.logs ?? "",
-              engine: item.engine ?? "antigravity",
-              error: item.error,
-            };
-          } else if (item.type === "done") {
-            isCompleted = true;
-            clearTimeout(timeoutTimer);
-            try { ws.close(); } catch {}
-
-            // Save generated files to worktree
-            if (finalResult.files && typeof finalResult.files === "object") {
-              for (const [filename, content] of Object.entries(finalResult.files)) {
-                console.log(`✨ Received generated file from proxy: ${filename}`);
-                await Deno.writeTextFile(`${worktreePath}/${filename}`, String(content));
-              }
-            }
-
-            return resolve({
-              success: finalResult.success ?? true,
-              output: finalResult.logs ?? "Proxy execution completed.",
-              durationMs: Date.now() - startTime,
-              error: finalResult.error,
-            });
+          const wrapper = JSON.parse(trimmed);
+          if (typeof wrapper.chunk === "string") {
+            payloadStr = wrapper.chunk;
+          }
+          if (wrapper.done === true) {
+            isDoneMessage = true;
           }
         } catch {
-          Deno.stdout.writeSync(new TextEncoder().encode(trimmed + "\n"));
+          // Plain string chunk
+        }
+
+        // Process inner NDJSON lines inside payloadStr
+        const innerLines = payloadStr.split("\n");
+        for (const innerLine of innerLines) {
+          const cleanLine = innerLine.trim();
+          if (!cleanLine) continue;
+
+          try {
+            const item = JSON.parse(cleanLine);
+            if (item.type === "chunk" && typeof item.text === "string") {
+              Deno.stdout.writeSync(new TextEncoder().encode(item.text));
+            } else if (item.type === "result" || item.success !== undefined) {
+              finalResult = {
+                success: item.success ?? true,
+                files: item.files ?? {},
+                logs: item.logs ?? "",
+                engine: item.engine ?? "antigravity",
+                error: item.error,
+              };
+            } else if (item.type === "done") {
+              isDoneMessage = true;
+            }
+          } catch {
+            Deno.stdout.writeSync(new TextEncoder().encode(cleanLine + "\n"));
+          }
+        }
+
+        if (isDoneMessage && !isCompleted) {
+          isCompleted = true;
+          clearTimeout(timeoutTimer);
+          try { ws.close(); } catch {}
+
+          // Save generated files to worktree
+          if (finalResult.files && typeof finalResult.files === "object") {
+            for (const [filename, content] of Object.entries(finalResult.files)) {
+              console.log(`✨ Received generated file from proxy: ${filename}`);
+              await Deno.writeTextFile(`${worktreePath}/${filename}`, String(content));
+            }
+          }
+
+          return resolve({
+            success: finalResult.success ?? true,
+            output: finalResult.logs ?? "Proxy execution completed.",
+            durationMs: Date.now() - startTime,
+            error: finalResult.error,
+          });
         }
       }
     };

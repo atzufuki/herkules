@@ -403,10 +403,18 @@ export async function handleTokenRelayRequest(req: Request): Promise<Response> {
 }
 
 export function handleClientWebSocket(ws: WebSocket, repoSpec: string): void {
+  console.log(`🔌 [ClientWS] Runner WebSocket Client connected for ${repoSpec}`);
+
+  ws.onclose = () => {
+    console.log(`🔌 [ClientWS] Runner WebSocket Client disconnected for ${repoSpec}`);
+  };
+
   ws.onmessage = async (event) => {
     try {
       const msg = typeof event.data === "string" ? JSON.parse(event.data) : {};
       const reqId = msg.id || crypto.randomUUID();
+      console.log(`🎯 [ClientWS] Received execution request for ${repoSpec} (reqId: ${reqId})`);
+
       const tunnelReq: TunnelMessage = {
         id: reqId,
         method: msg.method || "POST",
@@ -416,20 +424,27 @@ export function handleClientWebSocket(ws: WebSocket, repoSpec: string): void {
       };
 
       try {
+        let chunkCount = 0;
         await TunnelRegistry.sendStreamingRequest(
           repoSpec,
           tunnelReq,
           (chunkData) => {
             if (chunkData.chunk && ws.readyState === 1) {
+              chunkCount++;
+              if (chunkCount % 5 === 1 || chunkData.done) {
+                console.log(`📡 [ClientWS] Forwarded chunk #${chunkCount} (${chunkData.chunk.length} bytes) to runner for ${repoSpec}`);
+              }
               ws.send(chunkData.chunk);
             }
           },
           300000,
         );
+        console.log(`✓ [ClientWS] Proxy execution stream completed successfully for ${repoSpec} (${chunkCount} chunks forwarded)`);
         if (ws.readyState === 1) {
           ws.send(JSON.stringify({ type: "done", success: true }) + "\n");
         }
       } catch (err) {
+        console.error(`❌ [ClientWS] Streaming error for ${repoSpec}:`, err);
         if (ws.readyState === 1) {
           const errChunk = JSON.stringify({
             type: "result",
