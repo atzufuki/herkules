@@ -19,6 +19,7 @@ import { setRepoSecretWithGh } from "@herkules/github_app.ts";
 import { getGitHubContext } from "@herkules/github.ts";
 import { createWorktree, removeWorktree } from "@herkules/git.ts";
 import { handleTokenRelayRequest, TunnelMessage, TunnelResponse } from "@web/relay.ts";
+import { HERKULES_VERSION } from "../../version.ts";
 
 /**
  * Recursively scans directory using git status --porcelain to collect only modified and new text files.
@@ -243,8 +244,6 @@ export class ProxyCommand extends BaseCommand {
         }
       }
     }
-
-    const HERKULES_VERSION = "0.1.3-live-stream";
 
     console.log("=======================================================");
     console.log(`🚀 HERKULES LOCAL ANTIGRAVITY PROXY SERVER STARTED (v${HERKULES_VERSION})`);

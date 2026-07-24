@@ -24,8 +24,9 @@ import { addLabelToIssue, addReactionToIssueOrComment, buildFullIssueContext, cr
 import { getAppInstallationToken, loadEnvFiles } from "@herkules/github_app.ts";
 import { generateConventionalMetadata } from "@herkules/conventional.ts";
 import { formatCommandResponse, parseCommentCommand } from "@herkules/commands.ts";
+import { HERKULES_VERSION } from "../version.ts";
 
-const VERSION = "0.1.0";
+const VERSION = HERKULES_VERSION;
 
 export interface NdjsonStreamResult {
   success: boolean;

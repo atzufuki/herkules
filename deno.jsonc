@@ -7,7 +7,7 @@
     "deploy": "deno run -A jsr:@deno/deployctl deploy --project=herkules --entrypoint=project/http.ts",
     "test": "deno test -A --unstable-kv src/",
     "review": "deno run -A src/cli/cli.ts review",
-    "compile": "deno compile -A --unstable-kv -o herkules src/cli/cli.ts"
+    "compile": "deno run -A scripts/bump_version.ts && deno compile -A --unstable-kv -o herkules src/cli/cli.ts"
   },
   "imports": {
     "@std/cli": "jsr:@std/cli@^1.0.0",
