@@ -191,6 +191,17 @@ export async function fetchProxyExecutionViaWebSocket(
 
     let buffer = "";
 
+    let receivedChunkCount = 0;
+
+    const watchdogTimer = setTimeout(() => {
+      if (!isCompleted && receivedChunkCount === 0) {
+        isCompleted = true;
+        clearTimeout(timeoutTimer);
+        try { ws.close(); } catch {}
+        reject(new Error("❌ Live Stream Timeout: 0 chunks received from proxy for >45s. Live stream connection failed."));
+      }
+    }, 45000);
+
     ws.onmessage = async (event) => {
       const dataStr = String(event.data);
       buffer += dataStr;
@@ -225,6 +236,7 @@ export async function fetchProxyExecutionViaWebSocket(
           try {
             const item = JSON.parse(cleanLine);
             if (item.type === "chunk" && typeof item.text === "string") {
+              receivedChunkCount++;
               Deno.stdout.writeSync(new TextEncoder().encode(item.text));
               try { (Deno.stdout as any).flush?.(); } catch {}
             } else if (item.type === "result" || item.success !== undefined) {
@@ -239,6 +251,7 @@ export async function fetchProxyExecutionViaWebSocket(
               isDoneMessage = true;
             }
           } catch {
+            receivedChunkCount++;
             Deno.stdout.writeSync(new TextEncoder().encode(cleanLine + "\n"));
             try { (Deno.stdout as any).flush?.(); } catch {}
           }
@@ -247,6 +260,7 @@ export async function fetchProxyExecutionViaWebSocket(
         if (isDoneMessage && !isCompleted) {
           isCompleted = true;
           clearTimeout(timeoutTimer);
+          clearTimeout(watchdogTimer);
           try { ws.close(); } catch {}
 
           // Save generated files to worktree
@@ -273,6 +287,7 @@ export async function fetchProxyExecutionViaWebSocket(
 
     ws.onclose = () => {
       clearTimeout(timeoutTimer);
+      clearTimeout(watchdogTimer);
       if (!isCompleted) {
         isCompleted = true;
         // If files or result were already captured before close

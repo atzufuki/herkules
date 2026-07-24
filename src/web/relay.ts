@@ -108,17 +108,18 @@ export class TunnelRegistry {
             resolver(data.res);
             this.pendingRequests.delete(data.reqId);
           }
-        } else if (data.type === "chunk") {
-          const listener = this.chunkListeners.get(data.reqId);
+        } else if (data.type === "chunk" && data.payload) {
+          const payload: TunnelChunk = data.payload;
+          const listener = this.chunkListeners.get(payload.id);
           if (listener) {
-            listener(data.chunkData);
-            if (data.chunkData.done || data.chunkData.response) {
-              this.chunkListeners.delete(data.reqId);
+            listener(payload);
+            if (payload.done || payload.response) {
+              this.chunkListeners.delete(payload.id);
             }
           }
         }
-      } catch (err) {
-        console.error("❌ [TunnelRegistry] Bus error:", err);
+      } catch {
+        // Ignore bus errors
       }
     };
   }
@@ -127,13 +128,17 @@ export class TunnelRegistry {
     this.initBus();
     const key = repoSpec.toLowerCase();
     this.connections.set(key, ws);
-    console.log(`🔌 [TunnelRegistry] WebSocket tunnel registered for repository: ${key}`);
+    console.log(`🔌 [TunnelRegistry] WebSocket tunnel registered for repository: ${repoSpec}`);
 
     const updateKv = async () => {
       try {
         const kv = await getKv();
         if (kv) {
-          await kv.set(["tunnels", key], { online: true, updatedAt: Date.now() }, { expireIn: 30000 });
+          await kv.set(["tunnels", key], {
+            repo: repoSpec,
+            connectedAt: Date.now(),
+            lastSeen: Date.now(),
+          }, { expireIn: 30000 });
         }
       } catch {
         // Ignore KV errors if unsupported
@@ -172,7 +177,7 @@ export class TunnelRegistry {
       try {
         const payload: TunnelChunk = JSON.parse(event.data);
 
-        // Notify chunk listeners if present
+        // Notify chunk listeners if present on local isolate
         const listener = this.chunkListeners.get(payload.id);
         if (listener) {
           listener(payload);
@@ -180,6 +185,9 @@ export class TunnelRegistry {
             this.chunkListeners.delete(payload.id);
           }
         }
+
+        // Broadcast chunk to all other Deno Deploy edge isolates via BroadcastChannel
+        getTunnelBus()?.postMessage({ type: "chunk", payload });
 
         // Handle full response if present or standard response
         const resId = payload.id || payload.response?.id;
