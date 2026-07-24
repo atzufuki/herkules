@@ -81,29 +81,11 @@ export async function tunnelView(request: Request): Promise<Response> {
       tunnelReq,
       (chunkData) => {
         if (chunkData.chunk) {
-          const chunkLine = JSON.stringify({ type: "chunk", text: chunkData.chunk }) + "\n";
-          writer.write(encoder.encode(chunkLine)).catch(() => {});
+          writer.write(encoder.encode(chunkData.chunk)).catch(() => {});
         }
       },
       300000,
-    ).then(async (tunnelRes) => {
-      let resPayload: any = {};
-      if (tunnelRes.body) {
-        try {
-          resPayload = JSON.parse(tunnelRes.body);
-        } catch {
-          resPayload = { logs: tunnelRes.body };
-        }
-      }
-      const resultLine = JSON.stringify({
-        type: "result",
-        success: resPayload.success ?? (tunnelRes.status < 400),
-        files: resPayload.files ?? {},
-        logs: resPayload.logs ?? "",
-        engine: resPayload.engine ?? "antigravity",
-        error: resPayload.error,
-      }) + "\n";
-      await writer.write(encoder.encode(resultLine)).catch(() => {});
+    ).then(async () => {
       await writer.close().catch(() => {});
     }).catch(async (err) => {
       const errLine = JSON.stringify({

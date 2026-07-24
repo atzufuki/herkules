@@ -150,14 +150,27 @@ function connectNativeTunnel(relayUrl: string, repoSpec: string, localPort: numb
           body: msg.body,
         });
 
-        const resBody = await res.text();
+        if (res.body) {
+          const decoder = new TextDecoder();
+          for await (const chunkBytes of res.body) {
+            const text = decoder.decode(chunkBytes, { stream: true });
+            if (text) {
+              ws.send(JSON.stringify({ id: reqId, chunk: text, done: false }));
+            }
+          }
+          const remaining = decoder.decode();
+          if (remaining) {
+            ws.send(JSON.stringify({ id: reqId, chunk: remaining, done: false }));
+          }
+        }
+
         clearInterval(heartbeatTimer);
 
         const tunnelRes: TunnelResponse = {
           id: msg.id,
           status: res.status,
-          headers: { "Content-Type": "application/json" },
-          body: resBody,
+          headers: { "Content-Type": "application/x-ndjson" },
+          body: "",
         };
 
         ws.send(JSON.stringify({ id: reqId, response: tunnelRes, done: true }));
