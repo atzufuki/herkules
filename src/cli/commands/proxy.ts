@@ -255,7 +255,34 @@ export class ProxyCommand extends BaseCommand {
     console.log(`- Target Repo:     ${repoSpec ?? "Auto-detect"}`);
     console.log(`- Auth Security:   ${secretToken ? "Protected (Secret Token Set)" : "Open Local Endpoint"}`);
 
+    const activeWorktrees = new Set<{ worktreeObj?: any; worktreePath?: string }>();
     const controller = new AbortController();
+
+    const cleanupSignal = async () => {
+      console.log("\n🛑 SIGINT / Ctrl+C received. Cleaning up all active proxy tasks...");
+      try { controller.abort(); } catch {}
+      for (const active of Array.from(activeWorktrees)) {
+        try {
+          if (active.worktreeObj) {
+            await removeWorktree(active.worktreeObj, { deleteBranch: true }).catch(() => {});
+          } else if (active.worktreePath) {
+            await Deno.remove(active.worktreePath, { recursive: true }).catch(() => {});
+          }
+        } catch {
+          // Ignore
+        }
+      }
+      activeWorktrees.clear();
+      console.log("✓ Cleaned up all active proxy tasks and worktrees. Exiting cleanly.");
+      Deno.exit(0);
+    };
+
+    try {
+      Deno.addSignalListener("SIGINT", cleanupSignal);
+      Deno.addSignalListener("SIGTERM", cleanupSignal);
+    } catch {
+      // Ignore if signals unsupported
+    }
 
     const server = Deno.serve(
       { port, signal: controller.signal },
@@ -312,6 +339,9 @@ export class ProxyCommand extends BaseCommand {
               worktreePath = await Deno.makeTempDir({ prefix: "herkules-proxy-worktree-" });
             }
 
+            const activeHandle = { worktreeObj, worktreePath };
+            activeWorktrees.add(activeHandle);
+
             const { readable, writable } = new TransformStream();
             const writer = writable.getWriter();
             const encoder = new TextEncoder();
@@ -326,7 +356,7 @@ export class ProxyCommand extends BaseCommand {
 
               // Send 3-second keep-alive heartbeat chunks so Deno Deploy Edge Relay never times out (30s idle limit)
               const heartbeatTimer = setInterval(() => {
-                const pingChunk = JSON.stringify({ type: "chunk", text: `⏳ Agent running on local proxy...\n` }) + "\n";
+                const pingChunk = JSON.stringify({ type: "chunk", text: `⏳ [Local Proxy] Agent active & executing task...\n` }) + "\n";
                 writer.write(encoder.encode(pingChunk)).catch(() => {});
               }, 3000);
 
@@ -363,6 +393,7 @@ export class ProxyCommand extends BaseCommand {
                   await Deno.remove(worktreePath, { recursive: true }).catch(() => {});
                 }
 
+                activeWorktrees.delete(activeHandle);
                 console.log(`✓ Proxy execution completed successfully. (${Object.keys(files).length} files generated)`);
 
                 clearInterval(heartbeatTimer);
@@ -378,6 +409,7 @@ export class ProxyCommand extends BaseCommand {
                 await writer.write(encoder.encode(resultLine)).catch(() => {});
                 await writer.close().catch(() => {});
               } catch (err) {
+                activeWorktrees.delete(activeHandle);
                 clearInterval(heartbeatTimer);
                 const msg = err instanceof Error ? err.message : String(err);
                 console.error(`❌ Proxy execution error: ${msg}`);
